@@ -1,0 +1,486 @@
+---
+title: "Depression study"
+author: "Andjela Vucic"
+date: "2025-06-01"
+format:
+  html:
+    self-contained: false
+    fig-width: 10
+    fig-height: 6
+    fig-path: "images"
+    theme: cosmo
+    fontsize: 1.1em
+    linestretch: 1.7
+    toc: true
+    toc-depth: 3
+    toc-expand: 1
+    number-sections: true
+    toc-location: left
+    smooth_scroll: true
+editor: 
+  markdown: 
+    wrap: 72
+---
+```{r load-libraries, message=FALSE, warning=FALSE, echo=FALSE, results='hide'}
+library(knitr)
+library(tidyverse)
+library(naniar)
+library(gt)
+library(gtsummary)
+library(heatmaply)
+```
+# Introduction 
+
+<h3 style="font-weight: bold; margin-top: 1em;">Aim of the analysis</h3>
+The aim of this analysis is to investigate the relationship between alcohol intake frequency and the presence of depressive symptoms among adults aged 50 and above in Italy. Specifically, it explores whether different patterns of alcohol consumption are linked to self-reported depression, potentially reflecting alcohol use as a coping mechanism.
+
+
+<h3 style="font-weight: bold; margin-top: 1em;">Target population</h3>
+The target population consists of individuals aged 50 and older residing in Italy who participated in Wave 5 of the SHARE (Survey of Health, Ageing and Retirement in Europe) study.
+
+<h3 style="font-weight: bold; margin-top: 1em;">Sample selection</h3>
+The sample is drawn from the easySHARE dataset (Release 7.0.0) and includes all Italian respondents (country code 16) from Wave 5 who have valid responses for:
+
+- `eurod` (depression indicator)
+
+- `br010_mod` (alcohol intake frequency)
+
+Only cases with non-missing and valid values for these variables are retained in the analysis.
+
+**EURO-D Depression Scale**
+
+`eurod` is the sum of 12 symptoms (each coded 0 = absent, 1 = present), so it ranges from 0 to 12.
+
+**Scores of 4 or more** commonly used to define clinically relevant depression, while negative values represent missing or non-informative responses.
+
+<div style="text-align: center">
+
+| Value | Meaning               |
+|-------|-----------------------|
+| -2    | Refusal               |
+| -1    | Don't know            |
+| 0     | Not depressed         |
+| 1–11  | Intermediate scores   |
+| 12    | Very depressed        |
+
+</div>
+```{r symptoms-table, echo=FALSE, results='hide'}
+symptoms <- c(
+  euro1 = "Sadness",
+  euro2 = "Pessimism",
+  euro3 = "Suicidality",
+  euro4 = "Guilt",
+  euro5 = "Sleep",
+  euro6 = "Interest",
+  euro7 = "Irritability",
+  euro8 = "Appetite",
+  euro9 = "Fatigue",
+  euro10 = "Concentration",
+  euro11 = "Enjoyment",
+  euro12 = "Tearfulness"
+)
+```
+<h4 style="text-align:center;">The EURO-D Measure of Depressive Symptoms</h4>
+```{r, echo=FALSE}
+df <- data.frame(
+  Variable = names(symptoms),
+  Symptom = unname(symptoms),
+  stringsAsFactors = FALSE
+)
+df_transposed <- as.data.frame(t(df), stringsAsFactors = FALSE)
+row.names(df_transposed) <- c("Variable", "Symptom")
+gt(df_transposed)
+```
+
+
+
+
+**Alcohol Intake Categories**
+
+The variable `br010_mod` is a cleaned version of SHARE’s original `br010_`, which records how frequently participants consumed alcohol in the past 3 months.
+Only responses coded from 1 to 7 are used in the analysis. The table below shows the original coding:
+
+<div style="text-align: center">
+
+| Value | Meaning                        |
+|-------|--------------------------------|
+| -2    | Refusal                        |
+| -1    | Don't know                     |
+| 1     | Daily or almost every day      |
+| 2     | Five or six days a week        |
+| 3     | Three or four days a week      |
+| 4     | Once or twice a week           |
+| 5     | Once or twice a month          |
+| 6     | Less than once a month         |
+| 7     | Not at all in the last 3 months|
+
+</div>
+
+<h3 style="font-weight: bold; margin-top: 1em;">Outcome and explanatory variable</h3>
+**Outcome variable:**
+Depression was defined as a binary indicator based on the `eurod`, with scores of 4 or higher classified as 'depressed' and scores below 4 as 'not depressed'.
+0 = Not depressed (EURO-D score < 4)
+1 = Depressed (EURO-D score ≥ 4)
+
+**Main explanatory variable:**
+`alcohol_intake` – a relabeled version of `br010_mod`, reflecting alcohol consumption frequency in the last 3 months, ranging from 'Daily or almost every day' to 'Not at all'.
+
+**Covariates (adjustment variables):**
+`age_group` – categorized age (e.g., 50–59, 60–69, 70–79, 80+)
+`sex` – male, female (coded 0, 1)
+
+<h3 style="font-weight: bold; margin-top: 1em;">Type of statistical analysis</h3>
+IDA: structure, missingness, univariate variables insights & multivariate exploration  
+Descriptive tables / plots  
+Multivariable logistic regression: Exploring the association between alcohol intake and depression, adjusting for age group and gender.
+
+<h3 style="font-weight: bold; margin-top: 1em;">Data import</h3>
+```{r data-import}
+# Load the easySHARE dataset
+load("easySHARE_rel7_0_0.RDA")
+
+ES.data <- easySHARE_rel7_0_0
+rm(easySHARE_rel7_0_0)
+
+# recode negative codes to NA (SHARE convention)
+ES.data[ES.data < 0] <- NA
+```
+
+# Initial Data Analysis
+## Dataset structure
+The easySHARE dataset (Release 7.0.0) is a large, harmonized panel dataset, containing 365073 observations and 109 variables. Each row represents an individual interview, with repeated measures across multiple survey waves. The data include demographic, health, socioeconomic, and behavioral variables, as well as household and couple identifiers. For this analysis, we focus on Italian respondents in `Wave 5`, using key variables such as `age`, `sex`, `depression score`, and `alcohol intake frequency`. Missing values are present in some variables and have been recoded as NA.
+```{r data-print}
+# head(ES.data)
+# glimpse(ES.data, width = 60)
+```
+## Missingness
+Only a handful of answers are missing. Given the low proportion of missingness, its impact on the analysis is considered negligible.  
+Among 4744 Italian participants in Wave 5, 2.61% did not give a usable EURO‑D response, 0.1% did not report alcohol frequency, and 1 person had no recorded age, data for sex is not missing.
+```{r data-missingness}
+# Table of missing counts / percentages for key variables
+ES.data %>%
+  filter(country == 16, wave == 5) %>%
+  select(age, eurod, br010_mod, female) %>%
+  miss_var_summary() %>% # Summarize missing values per variable
+  gt() %>%
+  tab_header(title = "Missing‑value summary (Wave 5 Italy)")
+
+# Bar plot of % missing per variable
+ES.data %>%
+  filter(country == 16, wave == 5) %>%
+  select(age, eurod, br010_mod, female) %>%
+  gg_miss_var(show_pct = TRUE) +
+  labs(title = "Percent missing - key variables") +
+  theme_bw()
+```
+
+
+## Data cleaning
+In this chunk we filter the data to match our inclusion criteria, relabel the alcohol‑frequency scale, and drop the single record with missing age, we don't have to get rid of `sex` NA's since we saw no value is missing but in case it appears in dataset so for reproducibilty reasons it will remain in function. This way we have ready data `clean_data`.
+```{r data-cleaning, fig.width=10, fig.height=6, dpi=300}
+clean_data <- ES.data %>%
+  filter(
+    country == 16, wave == 5, age >= 50,
+    !is.na(eurod),
+    br010_mod %in% 1:7
+  ) %>%
+  mutate(
+    depression = factor(ifelse(eurod >= 4, 1, 0),
+      levels = c(0, 1),
+      labels = c("Not depressed", "Depressed")
+    ),
+    alcohol_intake = factor(8 - br010_mod,
+      levels = 1:7,
+      labels = c(
+        "Daily/almost daily",
+        "5-6 days/week",
+        "3-4 days/week",
+        "1-2 days/week",
+        "1-2 days/month",
+        "Less than once/month",
+        "None in last 3 months"
+      )
+    ),
+    age_group = cut(age,
+      breaks = c(50, 60, 70, 80, 100),
+      labels = c("50-59", "60-69", "70-79", "80+"),
+      right = FALSE
+    ),
+    sex = factor(female, levels = c(0, 1), labels = c("Male", "Female"))
+  ) %>%
+  drop_na(age, female, alcohol_intake, age_group)
+```
+
+## Univariate descriptions
+
+### EURO-D Depression
+The distribution of EURO-D depression scores among Italian adults aged 50 and above is right-skewed. Most participants report relatively few depressive symptoms:
+
+- The most common scores are 0, 1, 2, and 3, with 784, 833, 703, and 601 individuals respectively.
+- The number of participants decreases steadily as the score increases.
+- Only a small number of individuals report very high scores (e.g., only 6 people have the maximum score of 12).
+- This suggests that while depressive symptoms are present in the population, severe depression (high EURO-D scores) is relatively rare.
+
+
+```{r univariate-eurod}
+ggplot(clean_data, aes(x = eurod)) +
+  geom_histogram(binwidth = 1, fill = "grey", color = "white") +
+  labs(
+    title = "Distribution of EURO-D Depression Scores",
+    x = "EURO-D Score",
+    y = "Count"
+  ) +
+  theme_minimal()
+```
+
+#### Most Commonly Self-Reported Symptoms
+Unrelevant for this research question but for IDA its interesting to see all euro1,..,euro12 vars and what we work with. The most commonly reported EURO-D symptoms in this sample were irritability (48%), sadness (40%), and fatigue (38%). Other frequently reported symptoms included sleep disturbance (32%), poor concentration (28%), and tearfulness (26%). Less common symptoms were loss of enjoyment, pessimism, loss of interest, appetite loss, guilt, and suicidality, with suicidality being the least reported (5%).
+```{r univariate-eurod-all}
+symptom_freq <- clean_data %>%
+  summarise(across(names(symptoms), ~ mean(. == 1, na.rm = TRUE))) %>%
+  pivot_longer(everything(), names_to = "Variable", values_to = "Percent") %>%
+  mutate(
+    Symptom = symptoms[Variable],
+    Percent = Percent * 100
+  ) %>%
+  arrange(desc(Percent))
+
+ggplot(symptom_freq, aes(x = reorder(Symptom, Percent), y = Percent)) +
+  geom_col(fill = "#c19a6b") +
+  geom_text(aes(label = sprintf("%.1f%%", Percent)), hjust = -0.1, size = 3) +
+  coord_flip() +
+  labs(
+    title = "Most Common EURO-D Symptoms",
+    x = "Symptom",
+    y = "Percent Reporting Symptom"
+  ) +
+  theme_minimal() +
+  ylim(0, max(symptom_freq$Percent) + 10)
+```
+
+### Sex
+The sample consists of 2061 males and 2467 females, indicating a higher proportion of women among the surveyed participants in Wave 5.
+```{r univariate-sex}
+ggplot(clean_data, aes(x = sex, fill = sex)) +
+  geom_bar() +
+  geom_text(stat = "count", aes(label = after_stat(count)), vjust = -0.5) +
+  labs(
+    title = "Sex of Italian Participants",
+    x = "Sex", y = "Count"
+  ) +
+  theme_minimal() +
+  scale_fill_manual(values = c("Male" = "#afb8b2", "Female" = "grey"))
+```
+
+### Alcohol
+Initial data analysis reveals that a majority of participants (53.9%) reported not consuming alcohol at all in the past three months, while 26% drank daily or almost every day, and moderate drinking was less common. This highly skewed distribution suggests that most of the sample are non-drinkers, which could influence the analysis by limiting the variability in alcohol intake and potentially reducing the statistical power to detect associations with depression.
+```{r univariate-alcohol}
+ggplot(clean_data, aes(x = alcohol_intake)) +
+  geom_bar(fill = "#afb8b2") +
+  geom_text(stat = "count", aes(label = after_stat(count)), vjust = -0.5) +
+  labs(
+    title = "Distribution of Alcohol Consumption Frequency",
+    x = "Alcohol Intake Frequency",
+    y = "Count"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### Age
+The age group distribution shows that the highest number of participants is in the 60–69 range (1569 individuals), followed by the 70–79 group (1252 individuals), with 1236 participants in the 50–59 range and 471 in the 80+ group. Sample has fewer individuals in the oldest age bracket.
+``` {r univariate-age}
+mean_age <- mean(clean_data$age, na.rm = TRUE)
+median_age <- median(clean_data$age, na.rm = TRUE)
+
+ggplot(clean_data, aes(x = age_group)) +
+  geom_bar(fill = "#afb8b2") +
+  labs(
+    title = "Age Distribution by Age Group",
+    x = "Age Group",
+    y = "Count"
+  ) +
+  theme_minimal() +
+  annotate("text",
+    x = 2, y = max(table(clean_data$age_group)) * 0.9,
+    label = paste("Mean Age:", round(mean_age, 1), "\nMedian Age:", round(median_age, 1)),
+    size = 4, hjust = 0.5
+  )
+```
+
+## Multivariate descriptions
+### Depression by Age and Sex
+We can clearly observe that as people get older they are more likely to report experiencing depressive symptoms. There are clear differences among females and males, in the 50–59 age group, 19% of males are depressed compared to 37% of females, and by the 80+ group, these rates are 45.8% for males and 68.4% for females. This is important to adjust for sex in our analysis because doing so helps to account for these inherent differences.
+```{r multivariate-eurod-age}
+ggplot(
+  clean_data %>%
+    filter(!is.na(age_group)) %>%
+    count(age_group, sex, depression) %>%
+    group_by(age_group, sex) %>%
+    mutate(percent = round(100 * n / sum(n), 1)) %>%
+    ungroup(),
+  aes(x = age_group, y = n, fill = depression)
+) +
+  geom_col(position = position_dodge(width = 0.8)) +
+  geom_text(aes(label = paste0(percent, "%")),
+    position = position_dodge(width = 0.8),
+    vjust = -0.5, size = 2.9
+  ) +
+  facet_wrap(~sex) +
+  scale_fill_manual(values = c(
+    "Not depressed" = "#afb8b2",
+    "Depressed" = "#c19a6b"
+  )) +
+  labs(
+    title = "Depressive Symptoms by Age Group and Sex in Italy",
+    x = "Age Group",
+    y = "Count",
+    fill = "Depression"
+  ) +
+  theme_minimal()
+```
+
+### Alcohol intake by Age group
+As age increases, the proportion of daily drinkers remains relatively stable, while moderate drinking becomes less common.
+Non-drinking rises steadily with age, reaching 60% in the oldest group compared to 51% in the youngest.
+```{r multivariate-alcohol-age, warning=FALSE}
+prop_data <- clean_data %>%
+  count(alcohol_intake, age_group) %>%
+  group_by(age_group) %>%
+  mutate(proportion = n / sum(n)) %>%
+  ungroup() %>%
+  select(alcohol_intake, age_group, proportion)
+
+heatmap_prop <- prop_data %>%
+  pivot_wider(names_from = age_group, values_from = proportion, values_fill = 0) %>%
+  column_to_rownames("alcohol_intake") %>%
+  as.matrix()
+
+heatmaply(
+  heatmap_prop,
+  xlab = "Age Group",
+  ylab = "Alcohol Intake Frequency",
+  main = "Proportion of Alcohol Intake by Age Group",
+  colors = viridis::inferno(100),
+  dendrogram = "none",
+  grid_color = "white",
+  fontsize_row = 12,
+  fontsize_col = 12,
+  showticklabels = c(TRUE, TRUE)
+)
+```
+# Results
+## Joint distribution: depression by alcohol intake
+I grouped rare and frequent drinking as one group because samples are small and for readability.
+```{r depression-by-alcohol-intake}
+clean_data_simplified <- clean_data %>%
+  mutate(alcohol_simple = case_when(
+    alcohol_intake == "None in last 3 months" ~ "Non-drinker",
+    alcohol_intake %in% c(
+      "Less than once/month", "1-2 days/month",
+      "1-2 days/week", "3-4 days/week", "5-6 days/week"
+    ) ~ "Moderate drinker",
+    alcohol_intake == "Daily/almost daily" ~ "Daily drinker"
+  ) %>% factor(levels = c("Non-drinker", "Moderate drinker", "Daily drinker")))
+
+plot_data <- clean_data_simplified %>%
+  count(alcohol_simple, depression) %>%
+  group_by(alcohol_simple) %>%
+  mutate(percentage = round(100 * n / sum(n), 1)) %>%
+  ungroup()
+
+ggplot(clean_data_simplified, aes(x = alcohol_simple, fill = depression)) +
+  geom_bar(position = "fill") +
+  geom_text(
+    data = plot_data,
+    aes(
+      y = ifelse(depression == "Depressed",
+        percentage / 100 + 0.5,
+        percentage / 200
+      ),
+      label = paste0(percentage, "%")
+    ),
+    position = position_fill(vjust = 0.5),
+    size = 3
+  ) +
+  scale_fill_manual(values = c("Not depressed" = "#afb8b2", "Depressed" = "#c19a6b")) +
+  labs(
+    title = "Depression Status by Alcohol Consumption",
+    x = "Alcohol Consumption",
+    y = "Proportion"
+  ) +
+  scale_y_continuous(labels = scales::percent)
+```
+
+We observe that among Italians aged 50 and above, those who do not drink alcohol at all are the most likely to report depressive symptoms. However, this finding may be influenced by other factors, such as medication use or underlying health conditions.
+It is important to note that because our data are not longitudinal, we cannot determine whether non-drinkers have always abstained or if they stopped drinking due to health or other reasons.
+While both moderate and daily drinkers report lower rates of depressive symptoms compared to non-drinkers, daily drinkers have slightly higher likelihood of depression than moderate drinkers.
+
+
+## Logistic regression
+We know that women have higher odds for developing depression, so I thought that stratified analysis could be more relevant here.
+For males both moderate and daily drinking was associated with significantly lower odds of depression compared to non-drinkers. Being in older age group, above 70, increases the odds. 
+
+```{r logistic-regression}
+model_males <- glm(depression ~ alcohol_simple + age_group,
+  family = binomial, data = clean_data_simplified %>% filter(sex == "Male")
+)
+exp(cbind(OR = coef(model_males), confint(model_males)))
+summary(model_males)
+```
+
+Among female participants moderate drinking was associated to decreased odds of depression. Daily drinking has higher odds for depression compared to moderate drinking but result is not statistically significant so we can't conclude anything. 
+
+```{r}
+model_females <- glm(depression ~ alcohol_simple + age_group,
+  family = binomial, data = clean_data_simplified %>% filter(sex == "Female")
+)
+exp(cbind(OR = coef(model_females), confint(model_females)))
+summary(model_females)
+```
+
+### Interactions
+As I understand it, the interaction analysis indicates that the association between alcohol consumption and depression differs by sex. For men, daily drinking is linked with lower odds of depression compared to non-drinkers, whereas for women, daily drinking and non-drinking result in similar odds of depression.
+```{r interactions}
+lm_interact <- glm(
+  depression ~ alcohol_simple * sex + age_group,
+  family = binomial,
+  data = clean_data_simplified
+)
+summary(lm_interact)
+```
+
+## Predicted Probabilities 
+```{r vis-probabilities, echo=FALSE}
+newdata <- expand.grid(
+  alcohol_simple = levels(clean_data_simplified$alcohol_simple),
+  sex = levels(clean_data_simplified$sex),
+  age_group = levels(clean_data_simplified$age_group)
+)
+newdata$predicted <- predict(lm_interact, newdata = newdata, type = "response")
+
+ggplot(newdata, aes(
+  x = alcohol_simple, y = predicted,
+  group = sex, color = sex
+)) +
+  geom_line(linewidth = 1) +
+  geom_point() +
+  facet_wrap(~age_group) +
+  labs(
+    title = "Predicted Probabilities of Depression",
+    x = "Alcohol Consumption Category",
+    y = "Predicted Probability",
+    color = "Sex"
+  ) +
+  theme_minimal()
+```
+
+
+
+# Limitations
+
+- I wanted to adjust for `drugs010_` (self-reported use of drugs for anxiety or depression) to get more meaningful results but sadly its not in easySHARE release. 
+
+- Additionally, some studies found that binge drinking (>=7 drinks per occasion) was linked to depression for females. So more representative dataset in that sense would be better, to have more details about consumption, and also dataset that is a reflection of whole population.
+
+- We saw that the patterns are different for men and women, but we can’t draw strong conclusions without more information about why people don’t drink, their past drinking habits, and their current health or medication use, socioeconomic statues etc. Some groups, like daily drinking women and moderate alcohol groups were also quite small, which makes it harder to find clear results. 
